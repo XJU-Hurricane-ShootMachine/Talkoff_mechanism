@@ -27,23 +27,6 @@ void freertos_start(void);
 /*控制摩擦轮任务与实行任务的消息队列*/
 extern QueueHandle_t Queue_From_Fir;
 
-/*定义摩擦带电机以及俯仰角AK80-8D电机的参数，便于队列传输*/
-typedef struct {
-    float Fir_Speed[3];
-    float AK_PitchAngle;
-} Firection_Parameter_t;
-
-typedef struct motor_pid {
-    pid_t pid_pos;
-    pid_t pid_spd;
-} dji_pid;
-
-
-extern Firection_Parameter_t Firection_Send;
-
-extern TaskHandle_t task_AK80ctrl_handle;
-extern TaskHandle_t task_djictrl_handle;
-
 void task_AK80ctrl(void *pvParameters);
 void task_djictrl(void *pvParameters);
 

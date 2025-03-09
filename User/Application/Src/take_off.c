@@ -1,12 +1,13 @@
 /**
  * @file    take_off.c
- * @brief   底盘起跳的主要控制逻辑
- * @version 0.1
+ * @brief   底盘起跳的主要控制逻辑实现
+ * @version 0.2
  * @date    2025-03-05
  */
 
 #include <includes.h>
 #include "remote_ctrl.h"
+#include "talk_off.h"
 
 #define CANid_AK_1   100 /* CANid需要在上位机上查看 */
 #define CANid_AK_2   104
@@ -14,16 +15,13 @@
 #define dji_pushdown 90.0 /* 电机下压距离 */
 #define ak_pushdown  180.0
 
-TaskHandle_t task_AK80ctrl_handle;
-TaskHandle_t task_djictrl_handle;
-
 ak_motor_handle_t ak_motor_1;
 ak_motor_handle_t ak_motor_2;
 dji_motor_handle_t dji_motor_1;
 dji_motor_handle_t dji_motor_2;
 
-dji_pid motor2; /* dji电机1 */
-dji_pid motor1;
+dji_pid_t motor2; /* dji电机1 */
+dji_pid_t motor1;
 
 /**
  * @brief 大疆pid计算

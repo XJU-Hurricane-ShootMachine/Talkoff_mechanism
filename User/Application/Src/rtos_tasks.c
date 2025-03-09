@@ -9,15 +9,12 @@
 #include "includes.h"
 #include "uart2_calbackl.h"
 #include "remote_ctrl.h"
-#include "dji_angle.h"
-
-#include "shoot_machine.h"
 
 #include "queue.h"
 #include "semphr.h "
 
-/*控制摩擦轮任务与实行任务的消息队列*/
-QueueHandle_t Queue_From_Fir; // 单个变量消息队列句
+/*控制电机以及接收遥控器的消息队列*/
+QueueHandle_t Queue_From_Fir; 
 
 static TaskHandle_t start_task_handle;
 void start_task(void *pvParameters);
@@ -25,7 +22,9 @@ void start_task(void *pvParameters);
 static TaskHandle_t task_message_handle;
 void task_message(void *pvParameters);
 
-// int ak_flag = 0;
+static TaskHandle_t task_AK80ctrl_handle;
+static TaskHandle_t task_djictrl_handle;
+
 /*****************************************************************************/
 
 /**
