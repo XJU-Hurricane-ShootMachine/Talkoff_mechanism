@@ -68,7 +68,7 @@
          key_up = 1;
          return;
      }
- 
+    
      if (key_up && p_key_callback[g_remote_key] != NULL) {
          key_up = 0;
          p_key_callback[g_remote_key](g_remote_key);

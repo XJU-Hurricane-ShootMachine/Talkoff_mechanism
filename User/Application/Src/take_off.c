@@ -9,11 +9,11 @@
 #include "remote_ctrl.h"
 #include "talk_off.h"
 
-#define CANid_AK_1   100 /* CANid需要在上位机上查看 */
-#define CANid_AK_2   104
+#define CANid_AK_1   104 /* CANid需要在上位机上查看 */
+#define CANid_AK_2   105
 
-#define dji_pushdown 90.0 /* 电机下压距离 */
-#define ak_pushdown  180.0
+#define dji_pushdown 90.0   /* 电机下压距离 角度 */
+#define ak_pushdown  72000U /* 300圈 */
 
 ak_motor_handle_t ak_motor_1;
 ak_motor_handle_t ak_motor_2;
@@ -22,6 +22,32 @@ dji_motor_handle_t dji_motor_2;
 
 dji_pid_t motor2; /* dji电机1 */
 dji_pid_t motor1;
+
+int16_t angle_gap = 0;
+
+/**
+ * @brief 两个电机轮流转动至指定角度
+ *
+ * @param motor1
+ * @param motor2
+ * @param pos1
+ * @param pos2
+ * @note 通过轮流在前发送消息，减少两个电机之间的角度差
+ */
+void ak_set_pos_spd(ak_motor_handle_t *motor1, ak_motor_handle_t *motor2,
+                    float pos1, float pos2) {
+
+    static uint8_t falg = 0;
+    if (falg) {
+        ak_servo_set_pos_spd(motor1, pos1, 327670, 327000);
+        ak_servo_set_pos_spd(motor2, pos2, 327670, 327000);
+        falg = 0;
+    } else {
+        ak_servo_set_pos_spd(motor2, pos2, 327670, 327000);
+        ak_servo_set_pos_spd(motor1, pos1, 327670, 327000);
+        falg = 1;
+    }
+}
 
 /**
  * @brief 大疆pid计算
@@ -45,7 +71,7 @@ void dji_out(float real_angle) {
 }
 
 /**
- * @brief AK电机控制
+ * @brief AK电机控制 可以转动超过99圈
  * 
  * @param pvParameters pvParameters
  */
@@ -57,15 +83,94 @@ void task_AK80ctrl(void *pvParameters) {
                   can1_selected);
 
     int16_t ak_flag = 0;
-
+    int32_t ak_agler = ak_pushdown % 35640; /* 圈数较99的余读数  */
+    uint8_t ak_push_flag = 0; /* 按压标志位，在压下之后才会进行300圈回正 */
     while (1) {
         xQueueReceive(Queue_From_Fir, &ak_flag, 1);
+
+        angle_gap = (int16_t)ak_motor_1.pos + (int16_t)ak_motor_2.pos;
+
+        UNUSED(
+            angle_gap); /* 避免优化，因为上文这个变量只赋值了没有使用，编译器会优化掉 */
+
         if (ak_flag) { /* 电机向下压 */
-            ak_servo_set_pos_spd(&ak_motor_1, ak_pushdown, 327000, 327000);
-            ak_servo_set_pos_spd(&ak_motor_2, (-ak_pushdown), 327000, 327000);
-        } else {
-            ak_servo_set_pos_spd(&ak_motor_1, 0, 327000, 327000);
-            ak_servo_set_pos_spd(&ak_motor_2, 0, 327000, 327000);
+            if (ak_push_flag == 0) {
+                ak_agler = ak_pushdown; /* 当回零300圈之后 重新给角度赋值 */
+            }
+            if (ak_agler <
+                35640) { /* 因为任务时刻在运行，所以要以小角度保持一直转动 */
+
+                angle_gap = (int16_t)ak_motor_1.pos + (int16_t)ak_motor_2.pos;
+                ak_servo_set_pos_spd(&ak_motor_2, -ak_agler, 2164, 32760);
+                ak_servo_set_pos_spd(&ak_motor_1, ak_agler, 2164,
+                                     32760); /* 21690 */
+                vTaskDelay(10);
+            } else {
+                for (uint8_t i = 0; i < ak_pushdown / 35640;
+                     i++) { /* 在for循环里转完所有的 99 圈 */
+                    do {
+                        angle_gap =
+                            (int16_t)ak_motor_1.pos + (int16_t)ak_motor_2.pos;
+
+                        ak_servo_set_pos_spd(&ak_motor_1, 35640, 2164, 327000);
+                        ak_servo_set_pos_spd(&ak_motor_2, -35640, 2164, 327000);
+                        vTaskDelay(10);
+                    } while (ak_motor_1.spd > 200 ||
+                             (int16_t)ak_motor_1.pos != 3200);
+                    do {
+                        ak_servo_set_origin(
+                            &ak_motor_1,
+                            AK_ORIGIN_TEMPORARY); /* 设置临时原点 */
+                        ak_servo_set_origin(&ak_motor_2, AK_ORIGIN_TEMPORARY);
+                        vTaskDelay(30);
+                    } while (ak_motor_1.pos != 0);
+                }
+                ak_agler = ak_pushdown % 35640; /* 这里再将值赋为余数 */
+            }
+            ak_push_flag = 1; /* 将标志位赋1，可以进行300圈回正 */
+        }
+        /* 按下回拉 不进行按压 这里角度为余数 不会进行300圈回零*/
+        else {
+            if (ak_push_flag) {
+                ak_agler = ak_pushdown;
+            }
+            if (ak_agler < 35640) { /* 不满99圈直接归零 */
+                angle_gap = (int16_t)ak_motor_1.pos + (int16_t)ak_motor_2.pos;
+                ak_servo_set_pos_spd(&ak_motor_2, 0, 2164, 32760);
+                ak_servo_set_pos_spd(&ak_motor_1, 0, 2164, 32760); /* 21690 */
+                vTaskDelay(10);
+            } else {
+                /* 在这里先将小角度归零 */
+                while ((int32_t)ak_motor_1.pos != 0) {
+                    angle_gap =
+                        (int16_t)ak_motor_1.pos + (int16_t)ak_motor_2.pos;
+
+                    ak_servo_set_pos_spd(&ak_motor_2, 0, 2164, 32760);
+                    ak_servo_set_pos_spd(&ak_motor_1, 0, 2164, 32760);
+                    vTaskDelay(10);
+                }
+                for (uint8_t i = 0; i < ak_pushdown / 35640;
+                     i++) { /* 在for循环里转完所有的 99 圈 */
+                    do {
+                        angle_gap =
+                            (int16_t)ak_motor_1.pos + (int16_t)ak_motor_2.pos;
+
+                        ak_servo_set_pos_spd(&ak_motor_1, -35640, 2164, 327000);
+                        ak_servo_set_pos_spd(&ak_motor_2, 35640, 2164, 327000);
+                        vTaskDelay(10);
+                    } while (ak_motor_1.spd < -200 ||
+                             (int16_t)ak_motor_1.pos != -3200);
+                    do {
+                        ak_servo_set_origin(
+                            &ak_motor_1,
+                            AK_ORIGIN_TEMPORARY); /* 设置临时原点 */
+                        ak_servo_set_origin(&ak_motor_2, AK_ORIGIN_TEMPORARY);
+                        vTaskDelay(30);
+                    } while ((int16_t)ak_motor_1.pos != 0);
+                }
+                ak_agler = ak_pushdown % 35640;
+            }
+            ak_push_flag = 0;
         }
     }
 }
@@ -83,15 +188,14 @@ void task_djictrl(void *pvParameters) {
              0.02f, 0.5f); /* 电机1的速度和角度pid */
     pid_init(&motor1.pid_spd, 8192, 8192, 30, 8000, POSITION_PID, 5.0f, 0.01f,
              0.5f);
-
-    pid_init(&motor2.pid_pos, 16384, 5000, 1.0, 8000, POSITION_PID, 8.0f,
+    pid_init(&motor2.pid_pos, 16384, 5000, 1.0, 8000, POSITION_PID, 30.0f,
              0.001f, 0.0f); /* 电机2的速度和角度pid */
-    pid_init(&motor2.pid_spd, 8192, 8192, 30, 8000, POSITION_PID, 5.0f, 0.001f,
+    pid_init(&motor2.pid_spd, 8192, 8192, 30, 8000, POSITION_PID, 5.0f, 0.01f,
              0.2f);
-    int16_t ak_flag = 0;
+    int16_t dji_flag = 0;
     while (1) {
-        xQueueReceive(Queue_From_Fir, &ak_flag, 1);
-        if (ak_flag) {
+        xQueueReceive(Queue_From_Fir, &dji_flag, 1);
+        if (dji_flag) {
             dji_out(dji_pushdown); /* 向下压过程 */
         } else {
             dji_out(0.0);

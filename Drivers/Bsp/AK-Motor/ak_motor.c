@@ -369,8 +369,8 @@ void ak_servo_set_pos_spd(ak_motor_handle_t *motor, float pos, float spd,
     int32_t send_index = 0;
     uint8_t buffer[8];
     buffer_append_int32(buffer, (int32_t)(pos * 10000.0f), &send_index);
-    buffer_append_int16(buffer, (int16_t)(spd ), &send_index);
-    buffer_append_int16(buffer, (int16_t)(rpa ), &send_index);
+    buffer_append_int16(buffer, (int16_t)(spd), &send_index);
+    buffer_append_int16(buffer, (int16_t)(rpa), &send_index);
     can_send_message(motor->can_select, CAN_ID_EXT,
                      canid_append_mode(motor->id, CAN_PACKET_SET_POS_SPD),
                      send_index, buffer);
